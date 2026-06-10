@@ -185,9 +185,9 @@ time_intervals:
 
 Alert relabeling rewrites incoming alert labels before Alertmanager stores or
 routes the alert. `keep` and `drop` rules decide whether the alert is stored at
-all. `replace`, `labeldrop`, `labelkeep`, `lowercase`, and `uppercase` mutate
-the label set that later routing, grouping, silencing, inhibition, and
-deduplication use.
+all. `replace`, `labelmap`, `labeldrop`, `labelkeep`, `lowercase`, and
+`uppercase` mutate the label set that later routing, grouping, silencing,
+inhibition, and deduplication use.
 
 ```yaml
 # The source labels select values from existing alert labels. Their values are
@@ -207,8 +207,8 @@ deduplication use.
 # expanded from regex.
 [ replacement: <string> | default = $1 ]
 
-# Action to perform. Supported values are replace, keep, drop, labeldrop,
-# labelkeep, lowercase, and uppercase.
+# Action to perform. Supported values are replace, keep, drop, labelmap,
+# labeldrop, labelkeep, lowercase, and uppercase.
 [ action: <string> | default = replace ]
 ```
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/prometheus/common/model"
@@ -20,6 +21,7 @@ const (
 	Replace   Action = "replace"
 	Keep      Action = "keep"
 	Drop      Action = "drop"
+	LabelMap  Action = "labelmap"
 	LabelDrop Action = "labeldrop"
 	LabelKeep Action = "labelkeep"
 	Lowercase Action = "lowercase"
@@ -35,7 +37,7 @@ func (a *Action) UnmarshalYAML(unmarshal func(any) error) error {
 
 	action := Action(strings.ToLower(s))
 	switch action {
-	case Replace, Keep, Drop, LabelDrop, LabelKeep, Lowercase, Uppercase:
+	case Replace, Keep, Drop, LabelMap, LabelDrop, LabelKeep, Lowercase, Uppercase:
 		*a = action
 		return nil
 	default:
@@ -143,7 +145,7 @@ func (c *Config) Validate() error {
 		if !model.UTF8Validation.IsValidLabelName(c.TargetLabel) {
 			return fmt.Errorf("%q is invalid 'target_label' for %s action", c.TargetLabel, c.Action)
 		}
-	case Keep, Drop, LabelDrop, LabelKeep:
+	case Keep, Drop, LabelMap, LabelDrop, LabelKeep:
 	default:
 		return fmt.Errorf("unknown relabel action %q", c.Action)
 	}
@@ -201,6 +203,19 @@ func process(labels model.LabelSet, cfg *Config) bool {
 		} else {
 			labels[target] = model.LabelValue(replacement)
 		}
+	case LabelMap:
+		for _, name := range sortedLabelNames(labels) {
+			labelName := string(name)
+			indexes := cfg.Regex.FindStringSubmatchIndex(labelName)
+			if indexes == nil {
+				continue
+			}
+			target := string(cfg.Regex.ExpandString(nil, cfg.Replacement, labelName, indexes))
+			if !model.UTF8Validation.IsValidLabelName(target) {
+				continue
+			}
+			labels[model.LabelName(target)] = labels[name]
+		}
 	case LabelDrop:
 		for name := range labels {
 			if cfg.Regex.MatchString(string(name)) {
@@ -228,4 +243,15 @@ func sourceValue(labels model.LabelSet, names model.LabelNames, separator string
 		values = append(values, string(labels[name]))
 	}
 	return strings.Join(values, separator)
+}
+
+func sortedLabelNames(labels model.LabelSet) []model.LabelName {
+	names := make([]model.LabelName, 0, len(labels))
+	for name := range labels {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return names[i] < names[j]
+	})
+	return names
 }

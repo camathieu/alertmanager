@@ -57,6 +57,64 @@ func TestProcessRewritesEnvironmentSpecificSeverity(t *testing.T) {
 	}
 }
 
+func TestProcessLabelMapStripsEnvironmentSuffix(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		cfg          string
+		wantSeverity model.LabelValue
+		wantTeam     model.LabelValue
+	}{
+		{
+			name: "prod",
+			cfg: `
+- regex: (.+)_prod
+  replacement: $1
+  action: labelmap
+- regex: (.+)_(prod|preprod)
+  action: labeldrop
+`,
+			wantSeverity: "notification",
+			wantTeam:     "observability-alerts",
+		},
+		{
+			name: "preprod",
+			cfg: `
+- regex: (.+)_preprod
+  replacement: $1
+  action: labelmap
+- regex: (.+)_(prod|preprod)
+  action: labeldrop
+`,
+			wantSeverity: "ticket",
+			wantTeam:     "OBS",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfgs []*Config
+			require.NoError(t, yaml.UnmarshalStrict([]byte(tc.cfg), &cfgs))
+			for _, cfg := range cfgs {
+				require.NoError(t, cfg.Validate())
+			}
+
+			got, keep := Process(model.LabelSet{
+				"alertname":        "DiskFull",
+				"severity_prod":    "notification",
+				"severity_preprod": "ticket",
+				"team_prod":        "observability-alerts",
+				"team_preprod":     "OBS",
+			}, cfgs...)
+
+			require.True(t, keep)
+			require.Equal(t, tc.wantSeverity, got["severity"])
+			require.Equal(t, tc.wantTeam, got["team"])
+			require.NotContains(t, got, model.LabelName("severity_prod"))
+			require.NotContains(t, got, model.LabelName("severity_preprod"))
+			require.NotContains(t, got, model.LabelName("team_prod"))
+			require.NotContains(t, got, model.LabelName("team_preprod"))
+		})
+	}
+}
+
 func TestProcessDropsAlerts(t *testing.T) {
 	cfg := &Config{
 		Action:       Drop,
