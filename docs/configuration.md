@@ -147,6 +147,11 @@ global:
 templates:
   [ - <filepath> ... ]
 
+# A list of relabel rules applied to incoming alert labels before alerts are
+# validated, stored, routed, silenced, inhibited, or grouped.
+alert_relabel_configs:
+  [ - <alert_relabel_config> ... ]
+
 # The root node of the routing tree.
 route: <route>
 
@@ -174,6 +179,37 @@ time_intervals:
 # pass `--enable-feature=event-recorder` on the command line to
 # activate it.  See the Event Recorder section below.
 [ event_recorder: <event_recorder_config> ]
+```
+
+### `<alert_relabel_config>`
+
+Alert relabeling rewrites incoming alert labels before Alertmanager stores or
+routes the alert. `keep` and `drop` rules decide whether the alert is stored at
+all. `replace`, `labeldrop`, `labelkeep`, `lowercase`, and `uppercase` mutate
+the label set that later routing, grouping, silencing, inhibition, and
+deduplication use.
+
+```yaml
+# The source labels select values from existing alert labels. Their values are
+# concatenated using the configured separator and matched against regex.
+[ source_labels: '[' <labelname> [, ...] ']' ]
+
+# The separator placed between concatenated source label values.
+[ separator: <string> | default = ; ]
+
+# The regular expression matched against the concatenated source label value.
+[ regex: <regex> | default = (.*) ]
+
+# The target label written by replace, lowercase, or uppercase.
+[ target_label: <labelname> ]
+
+# The replacement value written by replace. Capture groups such as $1 are
+# expanded from regex.
+[ replacement: <string> | default = $1 ]
+
+# Action to perform. Supported values are replace, keep, drop, labeldrop,
+# labelkeep, lowercase, and uppercase.
+[ action: <string> | default = replace ]
 ```
 
 ## Route-related settings

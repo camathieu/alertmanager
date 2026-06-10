@@ -54,6 +54,7 @@ import (
 	"github.com/prometheus/alertmanager/matcher/compat"
 	"github.com/prometheus/alertmanager/pkg/labels"
 	"github.com/prometheus/alertmanager/provider"
+	"github.com/prometheus/alertmanager/relabel"
 	"github.com/prometheus/alertmanager/silence"
 	"github.com/prometheus/alertmanager/silence/silencepb"
 	"github.com/prometheus/alertmanager/tracing"
@@ -361,6 +362,7 @@ func (api *API) postAlertsHandler(params alert_ops.PostAlertsParams) middleware.
 
 	api.mtx.RLock()
 	resolveTimeout := time.Duration(api.alertmanagerConfig.Global.ResolveTimeout)
+	alertRelabelConfigs := api.alertmanagerConfig.AlertRelabelConfigs
 	api.mtx.RUnlock()
 
 	for _, alert := range alerts {
@@ -393,6 +395,13 @@ func (api *API) postAlertsHandler(params alert_ops.PostAlertsParams) middleware.
 		validationErrs error
 	)
 	for _, a := range alerts {
+		if len(alertRelabelConfigs) > 0 {
+			labels, keep := relabel.Process(a.Labels, alertRelabelConfigs...)
+			if !keep {
+				continue
+			}
+			a.Labels = labels
+		}
 		removeEmptyLabels(a.Labels)
 
 		if err := a.Validate(); err != nil {

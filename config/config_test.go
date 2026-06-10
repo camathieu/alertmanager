@@ -83,6 +83,50 @@ receivers:
 	}
 }
 
+func TestAlertRelabelConfigs(t *testing.T) {
+	in := `
+route:
+    receiver: team-X
+
+receivers:
+- name: 'team-X'
+
+alert_relabel_configs:
+- source_labels: [environment, severity_prod]
+  separator: ;
+  regex: prod;(.+)
+  target_label: severity
+  replacement: $1
+  action: replace
+- regex: severity_(prod|preprod)
+  action: labeldrop
+`
+	cfg, err := Load(in)
+	require.NoError(t, err)
+	require.Len(t, cfg.AlertRelabelConfigs, 2)
+	require.Equal(t, model.LabelNames{"environment", "severity_prod"}, cfg.AlertRelabelConfigs[0].SourceLabels)
+	require.Equal(t, "replace", string(cfg.AlertRelabelConfigs[0].Action))
+	require.Equal(t, "severity", cfg.AlertRelabelConfigs[0].TargetLabel)
+	require.Equal(t, "severity_(prod|preprod)", cfg.AlertRelabelConfigs[1].Regex.String())
+}
+
+func TestAlertRelabelConfigsInvalid(t *testing.T) {
+	in := `
+route:
+    receiver: team-X
+
+receivers:
+- name: 'team-X'
+
+alert_relabel_configs:
+- source_labels: [severity_prod]
+  target_label: ""
+  action: replace
+`
+	_, err := Load(in)
+	require.EqualError(t, err, "invalid alert_relabel_configs: relabel configuration for replace action requires 'target_label' value")
+}
+
 func TestReceiverExists(t *testing.T) {
 	in := `
 route:

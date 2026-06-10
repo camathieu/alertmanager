@@ -38,6 +38,7 @@ import (
 	"github.com/prometheus/alertmanager/notify/mattermost"
 	"github.com/prometheus/alertmanager/notify/msteams"
 	"github.com/prometheus/alertmanager/notify/webhook"
+	"github.com/prometheus/alertmanager/relabel"
 	"github.com/prometheus/alertmanager/timeinterval"
 	"github.com/prometheus/alertmanager/tracing"
 )
@@ -283,6 +284,9 @@ type Config struct {
 	InhibitRules []amcommoncfg.InhibitRule `yaml:"inhibit_rules,omitempty" json:"inhibit_rules,omitempty"`
 	Receivers    []Receiver                `yaml:"receivers,omitempty" json:"receivers,omitempty"`
 	Templates    []string                  `yaml:"templates" json:"templates"`
+	// AlertRelabelConfigs are applied to incoming alert labels before alerts
+	// are validated, stored, routed, silenced, inhibited, or grouped.
+	AlertRelabelConfigs []*relabel.Config `yaml:"alert_relabel_configs,omitempty" json:"alert_relabel_configs,omitempty"`
 	// Deprecated. Remove before v1.0 release.
 	MuteTimeIntervals []MuteTimeInterval `yaml:"mute_time_intervals,omitempty" json:"mute_time_intervals,omitempty"`
 	TimeIntervals     []TimeInterval     `yaml:"time_intervals,omitempty" json:"time_intervals,omitempty"`
@@ -371,6 +375,15 @@ func (c *Config) UnmarshalYAML(unmarshal func(any) error) error {
 
 	if c.Global.MattermostWebhookURL != nil && len(c.Global.MattermostWebhookURLFile) > 0 {
 		return errors.New("at most one of mattermost_webhook_url & mattermost_webhook_url_file must be configured")
+	}
+
+	for _, rc := range c.AlertRelabelConfigs {
+		if rc == nil {
+			return errors.New("missing alert relabel config")
+		}
+		if err := rc.Validate(); err != nil {
+			return fmt.Errorf("invalid alert_relabel_configs: %w", err)
+		}
 	}
 
 	names := map[string]struct{}{}

@@ -34,12 +34,15 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/prometheus/alertmanager/alert"
+	"github.com/prometheus/alertmanager/api/metrics"
 	open_api_models "github.com/prometheus/alertmanager/api/v2/models"
+	alert_ops "github.com/prometheus/alertmanager/api/v2/restapi/operations/alert"
 	general_ops "github.com/prometheus/alertmanager/api/v2/restapi/operations/general"
 	receiver_ops "github.com/prometheus/alertmanager/api/v2/restapi/operations/receiver"
 	silence_ops "github.com/prometheus/alertmanager/api/v2/restapi/operations/silence"
 	"github.com/prometheus/alertmanager/config"
 	"github.com/prometheus/alertmanager/pkg/labels"
+	"github.com/prometheus/alertmanager/provider"
 	"github.com/prometheus/alertmanager/silence"
 	"github.com/prometheus/alertmanager/silence/silencepb"
 )
@@ -605,6 +608,69 @@ receivers:
 	}
 }
 
+func TestPostAlertsHandlerAppliesAlertRelabelConfigs(t *testing.T) {
+	in := `
+route:
+    receiver: team-X
+
+receivers:
+- name: 'team-X'
+
+alert_relabel_configs:
+- source_labels: [environment, severity_prod]
+  separator: ;
+  regex: prod;(.+)
+  target_label: severity
+  replacement: $1
+  action: replace
+- source_labels: [environment, severity_preprod]
+  separator: ;
+  regex: preprod;(.+)
+  target_label: severity
+  replacement: $1
+  action: replace
+- regex: severity_(prod|preprod)
+  action: labeldrop
+`
+	cfg, err := config.Load(in)
+	require.NoError(t, err)
+
+	alerts := &captureAlerts{}
+	api := API{
+		alerts:             alerts,
+		uptime:             time.Now(),
+		logger:             promslog.NewNopLogger(),
+		alertmanagerConfig: cfg,
+		m:                  metrics.NewAlerts(prometheus.NewRegistry()),
+	}
+
+	r := httptest.NewRequest("POST", "/api/v2/alerts", nil)
+	w := httptest.NewRecorder()
+	responder := api.postAlertsHandler(alert_ops.PostAlertsParams{
+		HTTPRequest: r,
+		Alerts: open_api_models.PostableAlerts{
+			&open_api_models.PostableAlert{
+				Alert: open_api_models.Alert{
+					Labels: open_api_models.LabelSet{
+						"alertname":        "DiskFull",
+						"environment":      "prod",
+						"severity_prod":    "page",
+						"severity_preprod": "notification",
+					},
+				},
+				Annotations: open_api_models.LabelSet{},
+			},
+		},
+	})
+	responder.WriteResponse(w, runtime.TextProducer())
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, alerts.alerts, 1)
+	require.Equal(t, model.LabelValue("page"), alerts.alerts[0].Labels["severity"])
+	require.NotContains(t, alerts.alerts[0].Labels, model.LabelName("severity_prod"))
+	require.NotContains(t, alerts.alerts[0].Labels, model.LabelName("severity_preprod"))
+}
+
 func TestGetReceiversHandlerWithLabels(t *testing.T) {
 	in := `
 route:
@@ -886,6 +952,42 @@ receivers:
 	responder.WriteResponse(w, p)
 
 	require.Equal(t, 400, w.Code)
+}
+
+type captureAlerts struct {
+	alerts []*alert.Alert
+}
+
+func (c *captureAlerts) Subscribe(string) provider.AlertIterator {
+	return emptyAlertIterator()
+}
+
+func (c *captureAlerts) SlurpAndSubscribe(string) ([]*alert.Alert, provider.AlertIterator) {
+	return nil, emptyAlertIterator()
+}
+
+func (c *captureAlerts) GetPending() provider.AlertIterator {
+	return emptyAlertIterator()
+}
+
+func (c *captureAlerts) Get(fp model.Fingerprint) (*alert.Alert, error) {
+	for _, a := range c.alerts {
+		if a.Fingerprint() == fp {
+			return a, nil
+		}
+	}
+	return nil, provider.ErrNotFound
+}
+
+func (c *captureAlerts) Put(_ context.Context, alerts ...*alert.Alert) error {
+	c.alerts = append(c.alerts, alerts...)
+	return nil
+}
+
+func emptyAlertIterator() provider.AlertIterator {
+	ch := make(chan *provider.Alert)
+	close(ch)
+	return provider.NewAlertIterator(ch, make(chan struct{}), nil)
 }
 
 func BenchmarkOpenAPIAlertsToAlerts(b *testing.B) {
